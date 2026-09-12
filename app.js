@@ -74,7 +74,11 @@ async function addMemo(text) {
     });
   } catch (error) {
     console.error("메모 저장 실패:", error);
-    alert("메모를 저장하지 못했습니다.");
+    if (error.code === "permission-denied") {
+      alert("메모는 5글자 이상이어야 저장할 수 있습니다.");
+    } else {
+      alert("메모를 저장하지 못했습니다.");
+    }
   }
 }
 
