@@ -1,54 +1,92 @@
 // ===================================================
-// 우리 반 담벼락 - 시작점
+// 우리 반 담벼락
 //
-// 메모를 쓰면 올린 순서대로 담벼락에 붙습니다.
-// 지금은 데이터가 아래 배열에만 들어 있어서,
-// 브라우저를 새로고침하면 전부 사라집니다.
+// Firebase Firestore와 연동하여 메모를 실시간으로 저장하고 읽어옵니다.
 // ===================================================
 
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-analytics.js";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  onSnapshot
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
-// --- 메모 목록 ---
-// createdAt 은 메모를 쓴 시각(밀리초)입니다. 이 값으로 순서를 정합니다.
-let memos = [
-  { id: 1, text: "오늘 과학 시간에 한 실험이 재미있었다", createdAt: 1757030400000 },
-  { id: 2, text: "궁금한 점 - 물은 왜 100도에서 끓나요?", createdAt: 1757030500000 },
-  { id: 3, text: "모둠 친구들이 도와줘서 고마웠다", createdAt: 1757030600000 }
-];
+// Firebase 설정
+const firebaseConfig = {
+  apiKey: "AIzaSyB7KuYIowVNNiN7ESn4PA5ajjfV0RvaGWs",
+  authDomain: "live-draft-program.firebaseapp.com",
+  projectId: "live-draft-program",
+  storageBucket: "live-draft-program.firebasestorage.app",
+  messagingSenderId: "13118143377",
+  appId: "1:13118143377:web:d4120e4879212a56b77830",
+  measurementId: "G-F857DG48QD"
+};
 
-let nextId = 4;  // 새 메모에 붙일 번호
+// Firebase 및 Firestore 초기화
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
+
+// --- 메모 목록 (Firestore에서 읽어와 보관하는 배열) ---
+let memos = [];
+let unsubscribe = null;
 
 
 // ===================================================
 // 데이터를 다루는 함수 세 개
-// 백엔드 1 시간에 이 세 개가 Firestore를 쓰는 코드로 바뀝니다.
+// Firestore를 사용해 실시간으로 읽고 쓰고 지웁니다.
 // ===================================================
 
 // 메모를 읽어 옵니다.
-// 백엔드 1: 여기가 Firestore에서 가져오는 코드로 바뀝니다.
-//           순서는 orderBy("createdAt") 으로 맞춥니다.
+// Firestore의 memos 컬렉션을 실시간(onSnapshot)으로 감시하고,
+// createdAt 기준으로 올린 순서대로 정렬하여 불러옵니다.
 function loadMemos() {
-  return memos.slice().sort(function (a, b) {
-    return a.createdAt - b.createdAt;
+  if (unsubscribe) {
+    unsubscribe();
+  }
+
+  const q = query(collection(db, "memos"), orderBy("createdAt", "asc"));
+  unsubscribe = onSnapshot(q, function (snapshot) {
+    memos = [];
+    snapshot.forEach(function (docSnap) {
+      memos.push({
+        id: docSnap.id,
+        ...docSnap.data()
+      });
+    });
+    render();
   });
 }
 
 // 메모를 새로 씁니다.
 // 백엔드 2: 여기에 "누가 썼는지"(uid)를 함께 저장하게 됩니다.
-function addMemo(text) {
-  memos.push({
-    id: nextId,
-    text: text,
-    createdAt: Date.now()
-  });
-  nextId = nextId + 1;
+async function addMemo(text) {
+  try {
+    await addDoc(collection(db, "memos"), {
+      text: text,
+      createdAt: Date.now()
+    });
+  } catch (error) {
+    console.error("메모 저장 실패:", error);
+    alert("메모를 저장하지 못했습니다.");
+  }
 }
 
 // 메모를 지웁니다.
 // 백엔드 2: 지금은 누구든 남의 메모를 지울 수 있습니다. 이걸 막는 것이 과제입니다.
-function deleteMemo(id) {
-  memos = memos.filter(function (memo) {
-    return memo.id !== id;
-  });
+async function deleteMemo(id) {
+  try {
+    await deleteDoc(doc(db, "memos", id));
+  } catch (error) {
+    console.error("메모 삭제 실패:", error);
+    alert("메모를 삭제하지 못했습니다.");
+  }
 }
 
 
@@ -60,7 +98,7 @@ function render() {
   const wall = document.getElementById("wall");
   wall.innerHTML = "";
 
-  loadMemos().forEach(function (memo) {
+  memos.forEach(function (memo) {
     wall.appendChild(makeMemo(memo));
   });
 }
@@ -72,10 +110,9 @@ function makeMemo(memo) {
 
   const del = document.createElement("button");
   del.textContent = "×";
-  del.onclick = function () {
-    deleteMemo(memo.id);
-    render();
-  };
+  del.addEventListener("click", async function () {
+    await deleteMemo(memo.id);
+  });
   div.appendChild(del);
 
   const span = document.createElement("span");
@@ -93,20 +130,19 @@ function makeMemo(memo) {
 
 const input = document.getElementById("input");
 
-input.onkeydown = function (e) {
+input.addEventListener("keydown", async function (e) {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
 
     const text = input.value.trim();
     if (text === "") return;
 
-    addMemo(text);
     input.value = "";
-    render();
+    await addMemo(text);
   }
-};
+});
 
 
-// 첫 화면 그리기
-render();
+// 첫 화면 그리기 및 실시간 데이터 불러오기
+loadMemos();
 input.focus();
